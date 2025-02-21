@@ -1,7 +1,7 @@
 <div align="center">
 
 <a href="https://frappe.io/products/builder">
-    <img src="https://raw.githubusercontent.com/frappe/builder/master/frontend/public/builder_logo.png" height="100" alt="Frappe Builder Logo">
+    <img src="https://raw.githubusercontent.com/frappe/builder/master/frontend/public/builder_logo.png" height="80" alt="Frappe Builder Logo">
 </a>
 
 
@@ -16,11 +16,10 @@
 
 <div>
     <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/0de6372c-41cb-4fce-ba74-6a74f13860f3">
-        <img width="1402" alt="Frappe Builder Screenshot" src="https://github.com/user-attachments/assets/5801b6c2-d7f1-4f5f-a42c-075c06183c2b">
+        <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/7b013cc1-fe40-4b3c-a765-d8c3697bf81e">
+        <img width="1402" alt="Frappe Builder Screenshot" src="https://github.com/user-attachments/assets/d20cec8a-9e30-4ad5-9fc0-9c136fffa916">
     </picture>
 </div>
-
 
 [Website](https://frappe.io/builder) - [Documentation](https://docs.frappe.io/builder)
 </div>
@@ -40,7 +39,8 @@ Most existing solutions were either too complex, too restrictive, or difficult t
 - 🛠️ **Frappe CMS Integration:** Easily fetch data from your database and create dynamic pages.
 - 🧑‍💻 **Scripting Capabilities:** Customize with client scripts, global scripts, and styles.
 - 🚀 **One-Click Publishing:** Instantly share your creation with the world in a single click.
-- ⚡ **Performance Excellence:** Frappe Builder does not bloat web pages with unnecessary scripts hence pages built with Frappe Builder are highly performant, consistently scoring high on Google Lighthouse tests.
+- ⚡ **Performance Excellence:** Frappe Builder does not bloat web pages with unnecessary scripts hence pages are highly performant, consistently scoring high on Google Lighthouse tests.
+- 🧰 **Production Ready**: [Frappe.io](https://frappe.io) built on Frappe Builder, stands as a testament to its reliability in delivering production-ready solutions.
 
 ### Under the Hood
 
@@ -94,25 +94,50 @@ The script will set up a production-ready instance of Frappe Builder with all th
 
 ## Getting Started (Development)
 
+### Docker
+
+You need Docker, docker-compose and git setup on your machine. Refer [Docker documentation](https://docs.docker.com/). After that, run following command:
+
+**Step 1**: Setup folder and download the required files
+
+```bash
+mkdir frappe-builder && cd frappe-builder
+wget -O docker-compose.yml https://raw.githubusercontent.com/frappe/builder/develop/docker/docker-compose.yml
+wget -O init.sh https://raw.githubusercontent.com/frappe/builder/develop/docker/init.sh
+```
+
+**Step 2**: Run the container
+
+```bash
+docker compose up
+```
+
+Wait until the setup script creates a site and you see `Current Site set to builder.localhost` in the terminal. Once done, the site [http://builder.localhost:8000](http://builder.localhost:8000) should now be available.
+
+**Credentials:**
+Username: `Administrator`
+Password: `admin`
+
 ### Local Setup
 
 1. [Setup Bench](https://docs.frappe.io/framework/user/en/installation).
 1. In the frappe-bench directory, run `bench start` and keep it running.
 1. Open a new terminal session and cd into `frappe-bench` directory and run following commands:
-    ```sh
-    $ bench get-app builder
-    $ bench new-site sitename.localhost --install-app builder
-    $ bench browse sitename.localhost --user Administrator
-    ```
-1. Access the builder page at `sitename.localhost:8000/builder` in your web browser.
+```bash
+bench get-app builder
+bench new-site builder.localhost --install-app builder
+bench browse builder.localhost --user Administrator
+```
+1. Access the builder page at `builder.localhost:8000/builder` in your web browser.
 
 **For Frontend Development**
-1. Open a new terminal session and cd into `frappe-bench/apps/builder`, and run the following commands:
-    ```
-    yarn install
-    yarn dev
-    ```
-1. Now, you can access the site on vite dev server at `http://sitename.localhost:8080`
+1. Open a new terminal session and run the following commands:
+```bash
+cd frappe-bench/apps/builder
+yarn install
+yarn dev --host
+```
+1. Now, you can access the site on vite dev server at `http://builder.localhost:8080`
 
 **Note:** You'll find all the code related to Builder's frontend inside `frappe-bench/apps/builder/frontend`
 
@@ -125,7 +150,7 @@ The script will set up a production-ready instance of Frappe Builder with all th
 - [Documentation](https://docs.frappe.io/builder)
 - [Figma Plugin (Beta)](https://www.figma.com/community/plugin/1417835732014419099/figma-to-frappe-builder)
 
-<h2></h2>
+<br>
 <br>
 <div align="center">
 	<a href="https://frappe.io" target="_blank">

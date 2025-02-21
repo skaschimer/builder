@@ -11,31 +11,30 @@
 					}
 				" />
 		</div>
-		<div>
+		<div ref="componentContainer">
 			<div v-show="!components.length" class="mt-2 text-base italic text-gray-600">No components saved</div>
 			<div v-for="component in components" :key="component.name" class="flex w-full">
 				<div class="component-container group relative flex w-full flex-col">
 					<div
-						class="relative flex translate-x-0 translate-y-0 cursor-pointer items-center justify-between overflow-hidden truncate rounded border border-transparent bg-surface-white px-2 py-1.5"
+						class="user-component relative flex translate-x-0 translate-y-0 cursor-pointer items-center justify-between overflow-hidden truncate rounded border border-transparent bg-surface-white px-2 py-1.5"
 						draggable="true"
+						:data-component-id="component.component_id"
+						:data-component-name="component.name"
 						:class="{
-							'!border-gray-400 dark:!border-zinc-600':
+							'!border-outline-gray-4':
 								store.fragmentData.fragmentId === component.name ||
-								selectedComponent === component.component_id,
-						}"
-						@click="selectComponent(component)"
-						@dblclick="store.editComponent(null, component.name)"
-						@dragstart="(ev) => setComponentData(ev, component)">
-						<div class="flex items-center gap-2">
-							<FeatherIcon :name="'box'" class="h-4 w-4 text-gray-800 dark:text-zinc-400"></FeatherIcon>
-							<p class="text-base text-gray-800 dark:text-zinc-400">
+								componentStore.selectedComponent === component.component_id,
+						}">
+						<div class="flex items-center gap-2 text-ink-gray-7">
+							<FeatherIcon :name="'box'" class="h-4 w-4"></FeatherIcon>
+							<p class="text-base">
 								{{ component.component_name }}
 							</p>
 						</div>
 						<FeatherIcon
 							name="trash"
-							class="hidden h-3 w-3 cursor-pointer text-gray-800 group-hover:block dark:text-zinc-400"
-							@click.stop.prevent="deleteComponent(component)"></FeatherIcon>
+							class="hidden h-3 w-3 cursor-pointer text-ink-gray-5 group-hover:block"
+							@click.stop.prevent="componentStore.deleteComponent(component)"></FeatherIcon>
 					</div>
 				</div>
 			</div>
@@ -46,11 +45,14 @@
 import webComponent from "@/data/webComponent";
 import useStore from "@/store";
 import { BuilderComponent } from "@/types/Builder/BuilderComponent";
-import { confirm } from "@/utils/helpers";
+import useComponentStore from "@/utils/useComponentStore";
+import { useEventListener } from "@vueuse/core";
 import { computed, onMounted, ref } from "vue";
 
 const store = useStore();
+const componentStore = useComponentStore();
 const componentFilter = ref("");
+const componentContainer = ref(null);
 
 onMounted(() => {
 	webComponent.fetch();
@@ -69,31 +71,42 @@ const components = computed(() =>
 	}),
 );
 
-const deleteComponent = async (component: BlockComponent) => {
-	if (store.isComponentUsed(component.name)) {
-		alert("Component is used in current page. You cannot delete it.");
-	} else {
-		const confirmed = await confirm(
-			`Are you sure you want to delete component: ${component.component_name}?`,
-		);
-		if (confirmed) {
-			webComponent.delete.submit(component.name).then(() => {
-				store.componentMap.delete(component.name);
-			});
+useEventListener(componentContainer, "click", (e) => {
+	const component = (e.target as HTMLElement)?.closest(".user-component") as HTMLElement;
+	if (component) {
+		const componentStore = useComponentStore();
+		const componentId = component.dataset.componentId as string;
+		const componentName = component.dataset.componentName as string;
+		componentStore.selectedComponent = componentId;
+		// if in edit mode, open the component in editor
+		if (store.fragmentData.fragmentId) {
+			componentStore.editComponent(null, componentName);
 		}
 	}
-};
+});
 
-const setComponentData = (ev: DragEvent, component: BlockComponent) => {
-	ev?.dataTransfer?.setData("componentName", component.name);
-};
-
-const selectedComponent = ref<string | null>(null);
-const selectComponent = (component: BlockComponent) => {
-	selectedComponent.value = component.component_id;
-	// if in edit mode, open the component in editor
-	if (store.fragmentData.fragmentId) {
-		store.editComponent(null, component.name);
+useEventListener(componentContainer, "dragstart", (e) => {
+	const component = (e.target as HTMLElement)?.closest(".user-component") as HTMLElement;
+	if (component) {
+		setComponentData(e, component.dataset.componentName as string);
+		store.handleDragStart(e);
 	}
+});
+
+useEventListener(componentContainer, "dragend", () => {
+	store.handleDragEnd();
+});
+
+useEventListener(componentContainer, "dblclick", (e) => {
+	const component = (e.target as HTMLElement)?.closest(".user-component") as HTMLElement;
+	if (component) {
+		const componentStore = useComponentStore();
+		const componentName = component.dataset.componentName as string;
+		componentStore.editComponent(null, componentName);
+	}
+});
+
+const setComponentData = (ev: DragEvent, componentName: string) => {
+	ev?.dataTransfer?.setData("componentName", componentName);
 };
 </script>

@@ -1,39 +1,36 @@
 <template>
-	<BlockContextMenu :block="block" :editable="editable" v-slot="{ onContextMenu }">
-		<div
-			class="editor pointer-events-none fixed z-[18] box-content select-none ring-2 ring-inset"
-			ref="editor"
-			:selected="isBlockSelected"
-			@click.stop="handleClick"
-			@dblclick="handleDoubleClick"
-			@mousedown.prevent="handleMove"
-			@drop.prevent.stop="handleDrop"
-			@contextmenu="onContextMenu"
+	<div
+		class="editor pointer-events-none fixed z-[18] box-content select-none ring-2 ring-inset"
+		ref="editor"
+		:selected="isBlockSelected"
+		@click.stop="handleClick"
+		@dblclick="handleDoubleClick"
+		@mousedown.prevent="handleMove"
+		@drop.prevent.stop="handleDrop"
+		:data-block-id="block.blockId"
+		:class="getStyleClasses">
+		<PaddingHandler
 			:data-block-id="block.blockId"
-			:class="getStyleClasses">
-			<PaddingHandler
-				:data-block-id="block.blockId"
-				v-show="showPaddingHandler"
-				:target-block="block"
-				:target="target"
-				:on-update="updateTracker"
-				:disable-handlers="false"
-				:breakpoint="breakpoint" />
-			<MarginHandler
-				v-show="showMarginHandler"
-				:target-block="block"
-				:target="target"
-				:on-update="updateTracker"
-				:disable-handlers="false"
-				:breakpoint="breakpoint" />
-			<BorderRadiusHandler
-				:data-block-id="block.blockId"
-				v-if="showBorderRadiusHandler"
-				:target-block="block"
-				:target="target" />
-			<BoxResizer v-if="showResizer" :targetBlock="block" @resizing="resizing = $event" :target="target" />
-		</div>
-	</BlockContextMenu>
+			v-show="showPaddingHandler"
+			:target-block="block"
+			:target="target"
+			:on-update="updateTracker"
+			:disable-handlers="false"
+			:breakpoint="breakpoint" />
+		<MarginHandler
+			v-show="showMarginHandler"
+			:target-block="block"
+			:target="target"
+			:on-update="updateTracker"
+			:disable-handlers="false"
+			:breakpoint="breakpoint" />
+		<BorderRadiusHandler
+			:data-block-id="block.blockId"
+			v-if="showBorderRadiusHandler"
+			:target-block="block"
+			:target="target" />
+		<BoxResizer v-if="showResizer" :targetBlock="block" @resizing="resizing = $event" :target="target" />
+	</div>
 </template>
 <script setup lang="ts">
 import Block from "@/utils/block";
@@ -44,7 +41,6 @@ import blockController from "@/utils/blockController";
 import useStore from "../store";
 import setGuides from "../utils/guidesTracker";
 import trackTarget from "../utils/trackTarget";
-import BlockContextMenu from "./BlockContextMenu.vue";
 import BorderRadiusHandler from "./BorderRadiusHandler.vue";
 import BoxResizer from "./BoxResizer.vue";
 import MarginHandler from "./MarginHandler.vue";
@@ -56,6 +52,7 @@ const showResizer = computed(() => {
 	return (
 		!props.block.isRoot() &&
 		!props.editable &&
+		!store.isDragging &&
 		isBlockSelected.value &&
 		!blockController.multipleBlocksSelected() &&
 		!props.block.getParentBlock()?.isGrid() &&
@@ -97,10 +94,11 @@ const showPaddingHandler = computed(() => {
 	return (
 		isBlockSelected.value &&
 		!resizing.value &&
+		!store.isDragging &&
 		!props.editable &&
 		!blockController.multipleBlocksSelected() &&
 		!props.block.isSVG() &&
-		!props.block.isText()
+		(!props.block.isText() || (props.block.isLink() && props.block.hasChildren()))
 	);
 });
 
@@ -108,22 +106,24 @@ const showMarginHandler = computed(() => {
 	return (
 		isBlockSelected.value &&
 		!props.block.isRoot() &&
+		!store.isDragging &&
 		!resizing.value &&
 		!props.editable &&
 		!blockController.multipleBlocksSelected() &&
-		!props.block.isText()
+		(!props.block.isText() || (props.block.isLink() && props.block.hasChildren()))
 	);
 });
 
 const showBorderRadiusHandler = computed(() => {
 	return (
-		isBlockSelected &&
+		isBlockSelected.value &&
 		!props.block.isRoot() &&
 		!props.block.isText() &&
 		!props.block.isHTML() &&
 		!props.block.isSVG() &&
 		!props.editable &&
 		!resizing.value &&
+		!store.isDragging &&
 		!blockController.multipleBlocksSelected()
 	);
 });
@@ -151,6 +151,7 @@ watchEffect(() => {
 	store.showRightPanel;
 	store.showLeftPanel;
 	store.activeBreakpoint;
+	store.dropTarget.placeholder;
 	canvasProps.breakpoints.map((bp) => bp.visible);
 	nextTick(() => {
 		updateTracker.value();
@@ -166,12 +167,18 @@ const getStyleClasses = computed(() => {
 	if (movable.value && !props.block.isRoot()) {
 		classes.push("cursor-grab");
 	}
-	if (Boolean(props.block.extendedFromComponent)) {
+	if (props.block.isExtendedFromComponent()) {
 		classes.push("ring-purple-400");
 	} else {
 		classes.push("ring-blue-400");
 	}
-	if (isBlockSelected.value && !props.editable && !props.block.isRoot() && !props.block.isRepeater()) {
+	if (
+		isBlockSelected.value &&
+		!props.editable &&
+		!props.block.isRoot() &&
+		!props.block.isRepeater() &&
+		!store.isDragging
+	) {
 		// make editor interactive
 		classes.push("pointer-events-auto");
 		// Place the block on the top of the stack
@@ -244,6 +251,7 @@ const handleMove = (ev: MouseEvent) => {
 		store.editableBlock = props.block;
 	}
 	if (!movable.value || props.block.isRoot()) return;
+	const pauseId = store.activeCanvas?.history?.pause();
 	const target = ev.target as HTMLElement;
 	const startX = ev.clientX;
 	const startY = ev.clientY;
@@ -288,6 +296,7 @@ const handleMove = (ev: MouseEvent) => {
 			document.removeEventListener("mousemove", mousemove);
 			mouseUpEvent.preventDefault();
 			guides.hideX();
+			store.activeCanvas?.history?.resume(pauseId, true);
 		},
 		{ once: true },
 	);
