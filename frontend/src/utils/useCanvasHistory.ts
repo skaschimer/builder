@@ -1,18 +1,18 @@
 import Block from "@/utils/block";
 import { generateId, getBlockInstance, getBlockString } from "@/utils/helpers";
 import { debounceFilter, pausableFilter, watchIgnorable } from "@vueuse/core";
-import { nextTick, ref, Ref } from "vue";
+import { ref, Ref } from "vue";
 
 type CanvasState = {
 	block: string;
-	selectedBlockIds: string[];
+	selectedBlockIds: Set<string>;
 };
 type PauseId = string & { __brand: "PauseId" };
 
-const CAPACITY = 200;
+const CAPACITY = 500;
 const DEBOUNCE_DELAY = 100;
 
-export function useCanvasHistory(source: Ref<Block>, selectedBlockIds: Ref<string[]>) {
+export function useCanvasHistory(source: Ref<Block>, selectedBlockIds: Ref<Set<string>>) {
 	const undoStack = ref([]) as Ref<CanvasState[]>;
 	const redoStack = ref([]) as Ref<CanvasState[]>;
 	const last = ref(createHistoryRecord());
@@ -37,7 +37,6 @@ export function useCanvasHistory(source: Ref<Block>, selectedBlockIds: Ref<strin
 		stop: stopBlockWatcher,
 	} = watchIgnorable(source, commit, {
 		deep: true,
-		flush: "post",
 		eventFilter: blockWatcherFilter,
 	});
 
@@ -47,7 +46,6 @@ export function useCanvasHistory(source: Ref<Block>, selectedBlockIds: Ref<strin
 		stop: stopSelectedBlockUpdates,
 	} = watchIgnorable(selectedBlockIds, updateSelections, {
 		deep: true,
-		flush: "post",
 		eventFilter: selectionWatherFilter,
 	});
 
@@ -63,9 +61,7 @@ export function useCanvasHistory(source: Ref<Block>, selectedBlockIds: Ref<strin
 	}
 
 	function updateSelections() {
-		nextTick(() => {
-			last.value.selectedBlockIds = [...selectedBlockIds.value];
-		});
+		last.value.selectedBlockIds = new Set(selectedBlockIds.value);
 	}
 
 	function createHistoryRecord() {
@@ -82,7 +78,7 @@ export function useCanvasHistory(source: Ref<Block>, selectedBlockIds: Ref<strin
 		});
 		ignorePrevSelectedBlockUpdates();
 		ignoreSelectedBlockUpdates(() => {
-			selectedBlockIds.value = [...value.selectedBlockIds];
+			selectedBlockIds.value = new Set(value.selectedBlockIds);
 		});
 		last.value = value;
 	}
@@ -140,20 +136,17 @@ export function useCanvasHistory(source: Ref<Block>, selectedBlockIds: Ref<strin
 	}
 
 	function resume(pauseId?: PauseId, commitNow?: boolean, force?: boolean) {
-		nextTick(() => {
-			// console.log("resuming...", pauseId);
-			if (pauseId && pauseIdSet.has(pauseId)) {
-				pauseIdSet.delete(pauseId);
-			} else if (!force) {
-				return;
-			}
-
-			if (pauseIdSet.size && !force) {
-				return;
-			}
-			resumeTracking();
-			if (commitNow) commit();
-		});
+		if (pauseId && pauseIdSet.has(pauseId)) {
+			pauseIdSet.delete(pauseId);
+		} else if (!force) {
+			return;
+		}
+		if (pauseIdSet.size && !force) {
+			return;
+		}
+		pauseIdSet.clear();
+		resumeTracking();
+		if (commitNow) commit();
 	}
 
 	function batch(callback: () => void) {

@@ -1,4 +1,5 @@
 import AlertDialog from "@/components/AlertDialog.vue";
+import useStore from "@/store";
 import { confirmDialog, FileUploadHandler } from "frappe-ui";
 import { h, reactive, toRaw } from "vue";
 import { toast } from "vue-sonner";
@@ -98,6 +99,9 @@ async function confirm(message: string, title: string = "Confirm"): Promise<bool
 			onConfirm: ({ hideDialog }: { hideDialog: Function }) => {
 				resolve(true);
 				hideDialog();
+			},
+			onCancel: () => {
+				resolve(false);
 			},
 		});
 	});
@@ -278,13 +282,21 @@ function getBlockCopy(block: BlockOptions | Block, retainId = false): Block {
 	return getBlockInstance(b, retainId);
 }
 
-function isCtrlOrCmd(e: KeyboardEvent) {
+function isCtrlOrCmd(e: KeyboardEvent | MouseEvent) {
 	return e.ctrlKey || e.metaKey;
 }
 
-const detachBlockFromComponent = (block: Block) => {
+const detachBlockFromComponent = (block: Block, componentId: null | string) => {
+	if (!componentId) {
+		componentId = block.extendedFromComponent as string;
+	}
 	const blockCopy = getBlockCopy(block, true);
-	const component = block.getComponent();
+
+	if (block.extendedFromComponent && block.extendedFromComponent != componentId) {
+		return blockCopy;
+	}
+
+	const component = block.referenceComponent;
 	blockCopy.element = block?.getElement();
 	blockCopy.attributes = block.getAttributes();
 	blockCopy.classes = block.getClasses();
@@ -309,7 +321,7 @@ const detachBlockFromComponent = (block: Block) => {
 	delete blockCopy.extendedFromComponent;
 	delete blockCopy.isChildOfComponent;
 	delete blockCopy.referenceBlockId;
-	blockCopy.children = blockCopy.children.map(detachBlockFromComponent);
+	blockCopy.children = blockCopy.children.map((block) => detachBlockFromComponent(block, componentId));
 	return getBlockInstance(blockCopy);
 };
 
@@ -325,6 +337,7 @@ function getCopyWithoutParent(block: BlockOptions | Block): BlockOptions {
 	const blockCopy = { ...toRaw(block) };
 	blockCopy.children = blockCopy.children?.map((child) => getCopyWithoutParent(child));
 	delete blockCopy.parentBlock;
+	delete blockCopy.referenceComponent;
 	return blockCopy;
 }
 
@@ -350,7 +363,6 @@ async function uploadImage(file: File, silent = false) {
 	const upload = uploader.upload(file, {
 		private: false,
 		folder: "Home/Builder Uploads",
-		optimize: true,
 		upload_endpoint: "/api/method/builder.api.upload_builder_asset",
 	});
 	await new Promise((resolve) => {
@@ -382,15 +394,20 @@ async function uploadImage(file: File, silent = false) {
 }
 
 function dataURLtoFile(dataurl: string, filename: string) {
-	let arr = dataurl.split(","),
-		mime = arr[0].match(/:(.*?);/)?.[1],
-		bstr = atob(arr[1]),
-		n = bstr.length,
-		u8arr = new Uint8Array(n);
-	while (n--) {
-		u8arr[n] = bstr.charCodeAt(n);
+	try {
+		let arr = dataurl.split(","),
+			mime = arr[0].match(/:(.*?);/)?.[1],
+			bstr = atob(arr[1]),
+			n = bstr.length,
+			u8arr = new Uint8Array(n);
+		while (n--) {
+			u8arr[n] = bstr.charCodeAt(n);
+		}
+		return new File([u8arr], filename, { type: mime });
+	} catch (error) {
+		console.error(`Failed to convert dataURL ${dataurl} to file.`);
+		return null;
 	}
-	return new File([u8arr], filename, { type: mime });
 }
 
 declare global {
@@ -427,6 +444,54 @@ function generateId() {
 	return Math.random().toString(36).substr(2, 9);
 }
 
+function throttle<T extends (...args: any[]) => void>(func: T, wait: number = 1000) {
+	let timeout: ReturnType<typeof setTimeout> | null = null;
+	let lastArgs: Parameters<T> | null = null;
+	let pending = false;
+
+	const invoke = (...args: Parameters<T>) => {
+		lastArgs = args;
+		if (timeout) {
+			pending = true;
+			return;
+		}
+
+		func(...lastArgs);
+		timeout = setTimeout(() => {
+			timeout = null;
+			if (pending && lastArgs) {
+				pending = false;
+				invoke(...lastArgs);
+			}
+		}, wait);
+	};
+
+	return invoke;
+}
+
+function isBlock(e: MouseEvent) {
+	return (
+		(e.target instanceof HTMLElement || e.target instanceof SVGElement) &&
+		e.target.closest(".__builder_component__")
+	);
+}
+
+type BlockInfo = {
+	blockId: string;
+	breakpoint: string;
+};
+
+function getBlockInfo(e: MouseEvent) {
+	const target = (e.target as HTMLElement)?.closest(".__builder_component__") as HTMLElement;
+	return target.dataset as BlockInfo;
+}
+
+function getBlock(e: MouseEvent) {
+	const store = useStore();
+	const blockInfo = getBlockInfo(e);
+	return store.activeCanvas?.findBlock(blockInfo.blockId);
+}
+
 export {
 	addPxToNumber,
 	alert,
@@ -436,7 +501,9 @@ export {
 	detachBlockFromComponent,
 	findNearestSiblingIndex,
 	generateId,
+	getBlock,
 	getBlockCopy,
+	getBlockInfo,
 	getBlockInstance,
 	getBlockObjectCopy as getBlockObject,
 	getBlockString,
@@ -450,6 +517,7 @@ export {
 	getTextContent,
 	HexToHSV,
 	HSVToHex,
+	isBlock,
 	isCtrlOrCmd,
 	isHTMLString,
 	isJSONString,
@@ -460,5 +528,6 @@ export {
 	replaceMapKey,
 	RGBToHex,
 	stripExtension,
+	throttle,
 	uploadImage,
 };

@@ -24,6 +24,7 @@
 	</Dialog>
 </template>
 <script setup lang="ts">
+import Dialog from "@/components/Controls/Dialog.vue";
 import builderProjectFolder from "@/data/builderProjectFolder";
 import { useVModel } from "@vueuse/core";
 import { ref } from "vue";

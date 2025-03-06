@@ -1,37 +1,29 @@
 <template>
 	<div ref="objectEditor" class="flex flex-col gap-2" @paste="pasteObj">
-		<div v-for="(value, key) in obj" :key="key" class="flex gap-2">
+		<div v-for="(value, key, index) in obj" :key="index" class="flex gap-2">
 			<BuilderInput
 				placeholder="Property"
 				:modelValue="key"
-				@update:modelValue="(val: string) => replaceKey(key, val)"
-				class="rounded-md text-sm text-gray-800 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:focus:bg-zinc-700" />
+				@update:modelValue="(val: string) => replaceKey(key, val)" />
 			<BuilderInput
 				placeholder="Value"
 				:modelValue="value"
-				@update:modelValue="(val: string) => updateObjectValue(key, val)"
-				class="rounded-md text-sm text-gray-800 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:focus:bg-zinc-700" />
+				@update:modelValue="(val: string) => updateObjectValue(key, val)" />
 			<BuilderButton
-				variant="outline"
+				class="flex-shrink-0 text-xs"
+				variant="subtle"
 				icon="x"
-				class="p-2 dark:border-zinc-600 dark:bg-zinc-800 dark:text-gray-100 dark:outline-0 dark:hover:bg-zinc-700 dark:hover:text-gray-100"
 				@click="deleteObjectKey(key as string)"></BuilderButton>
 		</div>
-		<BuilderButton
-			variant="subtle"
-			label="Add"
-			class="dark:bg-zinc-800 dark:text-gray-100"
-			@click="addObjectKey"></BuilderButton>
-		<p
-			class="rounded-sm bg-gray-100 p-2 text-2xs text-gray-800 dark:bg-zinc-800 dark:text-zinc-300"
-			v-show="description">
+		<BuilderButton variant="subtle" label="Add" @click="addObjectKey"></BuilderButton>
+		<p class="rounded-sm bg-surface-gray-1 p-2 text-2xs text-ink-gray-7" v-show="description">
 			<span v-html="description"></span>
 		</p>
 	</div>
 </template>
 <script setup lang="ts">
 import { mapToObject, replaceMapKey } from "@/utils/helpers";
-import { ref } from "vue";
+import { nextTick, ref } from "vue";
 
 const props = defineProps<{
 	obj: Record<string, string>;
@@ -42,10 +34,16 @@ const emit = defineEmits({
 	"update:obj": (obj: Record<string, string>) => true,
 });
 
-const addObjectKey = () => {
+const addObjectKey = async () => {
 	const map = new Map(Object.entries(props.obj));
 	map.set("", "");
 	emit("update:obj", mapToObject(map));
+	await nextTick();
+	const inputs = objectEditor.value?.querySelectorAll("input");
+	if (inputs) {
+		const lastInput = inputs[inputs.length - 2];
+		lastInput.focus();
+	}
 };
 
 const updateObjectValue = (key: string, value: string) => {

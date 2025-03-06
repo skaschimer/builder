@@ -1,18 +1,18 @@
 import useStore from "@/store";
+import useComponentStore from "@/utils/useComponentStore";
 import { Editor } from "@tiptap/vue-3";
 import { clamp } from "@vueuse/core";
-import { CSSProperties, markRaw, nextTick, reactive } from "vue";
+import { computed, markRaw, nextTick, reactive } from "vue";
 import {
 	addPxToNumber,
 	dataURLtoFile,
 	getBlockCopy,
+	getBlockInstance,
 	getNumberFromPx,
 	getTextContent,
 	kebabToCamelCase,
 	uploadImage,
 } from "./helpers";
-
-export type styleProperty = keyof CSSProperties | `__${string}`;
 
 type BlockDataKeyType = "key" | "attribute" | "style";
 
@@ -45,8 +45,11 @@ class Block implements BlockOptions {
 	visibilityCondition?: string;
 	elementBeforeConversion?: string;
 	parentBlock: Block | null;
+	// @ts-expect-error
+	referenceComponent: Block | null;
 	customAttributes: BlockAttributeMap;
 	constructor(options: BlockOptions) {
+		const componentStore = useComponentStore();
 		this.element = options.element;
 		this.innerHTML = options.innerHTML;
 		this.extendedFromComponent = options.extendedFromComponent;
@@ -55,6 +58,26 @@ class Block implements BlockOptions {
 		this.referenceBlockId = options.referenceBlockId;
 		this.visibilityCondition = options.visibilityCondition;
 		this.parentBlock = options.parentBlock || null;
+		if (this.extendedFromComponent) {
+			componentStore.loadComponent(this.extendedFromComponent);
+		}
+		// TODO: Investigate this
+		// This fixes a weird case where referenceComponent used to return null even if the extendedFromComponent was set mostyl because of the reactive transformation of block during block instance creation. Still not entirely clear about this weird behavior
+		Object.defineProperty(this, "referenceComponent", {
+			value: computed(() => {
+				if (this.extendedFromComponent) {
+					return markRaw(componentStore.getComponentBlock(this.extendedFromComponent as string)) || null;
+				} else if (this.isChildOfComponent) {
+					const componentBlock = componentStore.getComponentBlock(this.isChildOfComponent as string);
+					const componentBlockInstance = findBlock(this.referenceBlockId as string, [componentBlock]);
+					return componentBlockInstance ? markRaw(componentBlockInstance) : null;
+				}
+				return null;
+			}),
+			writable: false,
+			enumerable: false,
+			configurable: true,
+		});
 
 		this.dataKey = options.dataKey || null;
 
@@ -71,7 +94,7 @@ class Block implements BlockOptions {
 		}
 		this.children = (options.children || []).map((child: BlockOptions) => {
 			child.parentBlock = this;
-			return reactive(new Block(child));
+			return getBlockInstance(child);
 		});
 
 		this.baseStyles = reactive(options.styles || options.baseStyles || {});
@@ -91,21 +114,18 @@ class Block implements BlockOptions {
 			this.removeStyle("minHeight");
 		}
 
-		if (this.extendedFromComponent) {
-			const store = useStore();
-			store.loadComponent(this.extendedFromComponent);
-		}
-
 		if (this.isImage()) {
 			// if src is base64, convert it to a file
 			const src = this.getAttribute("src") as string;
 			if (src && src.startsWith("data:image")) {
-				this.setAttribute("src", "");
-				options.src = "";
 				const file = dataURLtoFile(src, "image.png");
-				uploadImage(file, true).then((obj) => {
-					this.setAttribute("src", obj.fileURL);
-				});
+				if (file) {
+					this.setAttribute("src", "");
+					options.src = "";
+					uploadImage(file, true).then((obj) => {
+						this.setAttribute("src", obj.fileURL);
+					});
+				}
 			}
 		}
 	}
@@ -149,23 +169,8 @@ class Block implements BlockOptions {
 			this.tabletStyles = {};
 		}
 	}
-	getComponent() {
-		const store = useStore();
-		if (this.extendedFromComponent) {
-			return store.getComponentBlock(this.extendedFromComponent as string);
-		}
-		if (this.isChildOfComponent) {
-			const componentBlock = store.getComponentBlock(this.isChildOfComponent as string);
-			return (
-				store.activeCanvas?.findBlock(this.referenceBlockId as string, [componentBlock]) ||
-				store.activeCanvas?.findBlock(this.blockId as string, [componentBlock]) ||
-				new Block({})
-			);
-		}
-		return this;
-	}
 	getComponentStyles(breakpoint: string): BlockStyleMap {
-		return this.getComponent()?.getStyles(breakpoint);
+		return this.referenceComponent?.getStyles(breakpoint) || {};
 	}
 	getAttributes(): BlockAttributeMap {
 		let attributes = {};
@@ -176,7 +181,7 @@ class Block implements BlockOptions {
 		return attributes;
 	}
 	getComponentAttributes() {
-		return this.getComponent()?.attributes || {};
+		return this.referenceComponent?.attributes || {};
 	}
 	getClasses() {
 		let classes = [] as Array<string>;
@@ -187,7 +192,7 @@ class Block implements BlockOptions {
 		return classes;
 	}
 	getComponentClasses() {
-		return this.getComponent()?.classes || [];
+		return this.referenceComponent?.classes || [];
 	}
 	getChildren() {
 		return this.children;
@@ -195,13 +200,10 @@ class Block implements BlockOptions {
 	hasChildren() {
 		return this.getChildren().length > 0;
 	}
-	getComponentChildren() {
-		return this.getComponent()?.children || [];
-	}
 	getCustomAttributes() {
 		let customAttributes = {};
 		if (this.isExtendedFromComponent()) {
-			customAttributes = this.getComponent()?.customAttributes || {};
+			customAttributes = this.referenceComponent?.customAttributes || {};
 		}
 		customAttributes = { ...customAttributes, ...this.customAttributes };
 		return customAttributes;
@@ -209,21 +211,21 @@ class Block implements BlockOptions {
 	getRawStyles() {
 		let rawStyles = {};
 		if (this.isExtendedFromComponent()) {
-			rawStyles = this.getComponent()?.rawStyles || {};
+			rawStyles = this.referenceComponent?.rawStyles || {};
 		}
 		rawStyles = { ...rawStyles, ...this.rawStyles };
 		return rawStyles;
 	}
 	getVisibilityCondition() {
 		let visibilityCondition = this.visibilityCondition;
-		if (this.isExtendedFromComponent() && this.getComponent()?.visibilityCondition) {
-			visibilityCondition = this.getComponent()?.visibilityCondition;
+		if (this.isExtendedFromComponent() && this.referenceComponent?.visibilityCondition) {
+			visibilityCondition = this.referenceComponent?.visibilityCondition;
 		}
 		return visibilityCondition;
 	}
 	getBlockDescription() {
 		if (this.extendedFromComponent) {
-			return this.getComponentBlockDescription();
+			return this.getComponentBlockDescription() || "";
 		}
 		if (this.isHTML()) {
 			const innerHTML = this.getInnerHTML() || "";
@@ -234,15 +236,15 @@ class Block implements BlockOptions {
 				return "raw";
 			}
 		}
-		let description = this.blockName || this.originalElement || this.getElement();
+		let description = this.blockName || this.originalElement || this.getElement() || "";
 		if (this.getTextContent() && !this.blockName) {
 			description += " | " + this.getTextContent();
 		}
 		return description;
 	}
 	getComponentBlockDescription() {
-		const store = useStore();
-		return store.getComponentName(this.extendedFromComponent as string);
+		const componentStore = useComponentStore();
+		return componentStore.getComponentName(this.extendedFromComponent as string);
 	}
 	getTextContent() {
 		return getTextContent(this.getInnerHTML() || "");
@@ -284,7 +286,7 @@ class Block implements BlockOptions {
 	setStyle(style: styleProperty, value: StyleValue) {
 		const store = useStore();
 		let styleObj = this.baseStyles;
-		style = kebabToCamelCase(style) as styleProperty;
+		style = kebabToCamelCase(style as string) as styleProperty;
 		if (store.activeBreakpoint === "mobile") {
 			styleObj = this.mobileStyles;
 		} else if (store.activeBreakpoint === "tablet") {
@@ -311,7 +313,7 @@ class Block implements BlockOptions {
 		delete this.tabletStyles[style];
 	}
 	setBaseStyle(style: styleProperty, value: StyleValue) {
-		style = kebabToCamelCase(style) as styleProperty;
+		style = kebabToCamelCase(style as string) as styleProperty;
 		this.baseStyles[style] = value;
 	}
 	getStyle(style: styleProperty) {
@@ -325,7 +327,7 @@ class Block implements BlockOptions {
 			styleValue = this.baseStyles[style];
 		}
 		if (styleValue === undefined && this.isExtendedFromComponent()) {
-			styleValue = this.getComponent()?.getStyle(style) as StyleValue;
+			styleValue = this.referenceComponent?.getStyle(style) as StyleValue;
 		}
 		return styleValue;
 	}
@@ -384,7 +386,7 @@ class Block implements BlockOptions {
 		return this.getElement() || "div";
 	}
 	getComponentTag() {
-		return this.getComponent()?.getTag() || "div";
+		return this.referenceComponent?.getTag() || "div";
 	}
 	isDiv() {
 		return this.getElement() === "div";
@@ -420,13 +422,13 @@ class Block implements BlockOptions {
 		}
 	}
 	addChild(child: BlockOptions, index?: number | null, select: boolean = true) {
-		child.parentBlock = this;
 		if (index === undefined || index === null) {
 			index = this.children.length;
 		}
 		index = clamp(index, 0, this.children.length);
 
-		const childBlock = reactive(new Block(child));
+		const childBlock = getBlockInstance(child);
+		childBlock.parentBlock = this;
 		this.children.splice(index, 0, childBlock);
 		if (select) {
 			childBlock.selectBlock();
@@ -453,7 +455,10 @@ class Block implements BlockOptions {
 		newChild.parentBlock = this;
 		const index = this.getChildIndex(child);
 		if (index > -1) {
-			this.children.splice(index, 1, newChild);
+			// This is not triggering the reactivity even though the child object is reactive
+			// this.children.splice(index, 1, newChild);
+			this.removeChild(child);
+			this.addChild(newChild, index);
 		}
 	}
 	getChildIndex(child: Block) {
@@ -622,7 +627,7 @@ class Block implements BlockOptions {
 	getDataKey(key: keyof BlockDataKey): string {
 		let dataKey = (this.dataKey && this.dataKey[key]) || "";
 		if (!dataKey && this.isExtendedFromComponent()) {
-			dataKey = this.getComponent()?.getDataKey(key);
+			dataKey = this.referenceComponent?.getDataKey(key) || "";
 		}
 		return dataKey;
 	}
@@ -639,15 +644,15 @@ class Block implements BlockOptions {
 	getInnerHTML(): string {
 		let innerHTML = this.innerHTML || "";
 		if (!innerHTML && this.isExtendedFromComponent()) {
-			innerHTML = this.getComponent().getInnerHTML();
+			innerHTML = this.referenceComponent?.getInnerHTML() || "";
 		}
 		return innerHTML;
 	}
 	setInnerHTML(innerHTML: string) {
 		this.innerHTML = innerHTML;
 	}
-	toggleVisibility() {
-		if (this.getStyle("display") === "none") {
+	toggleVisibility(show: boolean | null = null) {
+		if ((this.getStyle("display") === "none" && show !== false) || show === true) {
 			this.setStyle("display", this.getStyle("__last_display") || "flex");
 			this.setStyle("__last_display", null);
 		} else {
@@ -660,20 +665,27 @@ class Block implements BlockOptions {
 	}
 	extendFromComponent(componentName: string) {
 		this.extendedFromComponent = componentName;
-		const component = this.getComponent();
-		extendWithComponent(this, componentName, component.children);
+		// @ts-expect-error
+		this.referenceComponent?.effect?.run();
+		const component = this.referenceComponent as Block;
+		if (component) {
+			extendWithComponent(this, componentName, component.children);
+		}
 	}
 	isChildOfComponentBlock() {
 		return Boolean(this.isChildOfComponent);
 	}
 	resetWithComponent() {
-		const component = this.getComponent();
+		const component = this.referenceComponent;
 		if (component) {
 			resetWithComponent(this, this.extendedFromComponent as string, component.children);
+			// TODO: Remove this
+			const store = useStore();
+			store.activeCanvas?.history?.resume(undefined, true, true);
 		}
 	}
 	syncWithComponent() {
-		const component = this.getComponent();
+		const component = this.referenceComponent;
 		if (component) {
 			syncBlockWithComponent(this, this, this.extendedFromComponent as string, component.children);
 		}
@@ -694,12 +706,12 @@ class Block implements BlockOptions {
 	}
 	getElement() {
 		if (this.isExtendedFromComponent()) {
-			return this.getComponent()?.element || this.element;
+			return this.referenceComponent?.element || this.element;
 		}
 		return this.element;
 	}
 	getUsedComponentNames() {
-		const store = useStore();
+		const componentStore = useComponentStore();
 		const componentNames = [] as string[];
 		if (this.extendedFromComponent) {
 			componentNames.push(this.extendedFromComponent);
@@ -712,7 +724,7 @@ class Block implements BlockOptions {
 		});
 
 		componentNames.forEach((name) => {
-			componentNames.push(...store.getComponentBlock(name).getUsedComponentNames());
+			componentNames.push(...componentStore.getComponentBlock(name).getUsedComponentNames());
 		});
 
 		return new Set(componentNames);
@@ -750,14 +762,14 @@ class Block implements BlockOptions {
 		if (parentBlock) {
 			child = parentBlock.addChildAfter(blockCopy, this);
 		} else {
-			child = store.activeCanvas?.getFirstBlock().addChild(blockCopy) as Block;
+			child = store.activeCanvas?.getRootBlock().addChild(blockCopy) as Block;
 		}
 		nextTick(() => {
 			if (child) {
 				child.selectBlock();
+				pauseId && store.activeCanvas?.history?.resume(pauseId, true);
 			}
 		});
-		pauseId && store.activeCanvas?.history?.resume(pauseId, true);
 	}
 	getPadding() {
 		const padding = this.getStyle("padding") || "0px";
@@ -893,12 +905,12 @@ function extendWithComponent(
 	componentChildren: Block[],
 	resetOverrides: boolean = true,
 ) {
-	resetBlock(block, true, resetOverrides);
+	resetBlock(block, false, resetOverrides);
 	block.children?.forEach((child, index) => {
 		child.isChildOfComponent = extendedFromComponent;
 		let componentChild = componentChildren[index];
 		if (child.extendedFromComponent) {
-			const component = child.getComponent();
+			const component = child.referenceComponent;
 			child.referenceBlockId = componentChild.blockId;
 			extendWithComponent(child, child.extendedFromComponent, component.children, false);
 		} else if (componentChild) {
@@ -922,7 +934,7 @@ function resetWithComponent(
 		blockComponent.referenceBlockId = componentChild.blockId;
 		const childBlock = block.addChild(blockComponent, null, false);
 		if (componentChild.extendedFromComponent) {
-			const component = childBlock.getComponent();
+			const component = childBlock.referenceComponent;
 			resetWithComponent(childBlock, componentChild.extendedFromComponent, component.children, false);
 		} else {
 			resetWithComponent(childBlock, extendedWithComponent, componentChild.children, resetOverrides);
@@ -988,6 +1000,7 @@ function resetBlock(
 		block.attributes = {};
 		block.customAttributes = {};
 		block.classes = [];
+		block.dataKey = null;
 	}
 
 	if (resetChildren) {
@@ -995,6 +1008,21 @@ function resetBlock(
 			resetBlock(child, resetChildren, !Boolean(child.extendedFromComponent));
 		});
 	}
+}
+
+function findBlock(blockId: string, blocks: Block[]): Block | null {
+	for (const block of blocks) {
+		if (block.blockId === blockId) {
+			return block;
+		}
+		if (block.children) {
+			const found = findBlock(blockId, block.children);
+			if (found) {
+				return found;
+			}
+		}
+	}
+	return null;
 }
 
 export default Block;

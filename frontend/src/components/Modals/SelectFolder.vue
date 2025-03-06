@@ -30,6 +30,7 @@
 	</Dialog>
 </template>
 <script setup lang="ts">
+import Dialog from "@/components/Controls/Dialog.vue";
 import FolderIcon from "@/components/Icons/Folder.vue";
 import builderProjectFolder from "@/data/builderProjectFolder";
 import { useVModel } from "@vueuse/core";
